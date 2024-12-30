@@ -1,36 +1,4 @@
 
-function FileTime(x) {
-        if( Math.abs( Date.now()/1000 - 1*x ) <= 5*60 ) return "just now";
-        const d = new Date(1000*x);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth()+1).padStart(2,'0');
-        const dd = String(d.getDate()).padStart(2,'0');
-        return `${yyyy}-${mm}-${dd}`;
-}
-
-function upload(){
-    ohelpc('upload','Upload new file',`<file-upload></file-upload>`);
-}
-
-
-async function relist(){
-    dom('ipfs-list','');
-    return await IPFS.List({
-	    type:"exist",
-	    table_template: "<table border='0' cellpadding='2' cellspacing='0' id='ipfs-list-table'>{table}</table>",
-	    template: `<tr hash='{#hash}'>
-<td>{i}</td>
-<td><i alt='Delete' onclick='IPFS.Del(this)' class='e_cancel mv'></i></td>
-<td><a class='r' onclick='return IPFS.View(this)' href='{#url}'>{#hash}</a></td>
-<td><i class='e_help'></i></td>
-<td class='r'></td>
-<td class='r leng'></td>
-<td class='br'><a href='{ipfsurl}' target='_blank'>ipfs.io</td>
-</tr>`
-    });
-}
-
-
 function INIT() {
     nonav = 1;
     IPFS.onready = async function(){
@@ -45,15 +13,31 @@ function INIT() {
 
 		<p><div id='ipfs-list'></div>
 	`);
-	var o = await relist();
-	// console.log('o',o);
-	// UPLOAD.showhash();
+	var o = await UPLOAD.relist();
     };
     IPFS.init();
 }
 
 
 UPLOAD = {
+
+  relist: async function(){ // upload file list
+    dom('ipfs-list','');
+    return await IPFS.List({
+	    type:"exist",
+	    table_template: "<table border='0' cellpadding='2' cellspacing='0' id='ipfs-list-table'>{table}</table>",
+	    template: `<tr hash='{#hash}'>
+<td>{i}</td>
+<td><i alt='Delete' onclick='IPFS.Del(this)' class='e_cancel mv'></i></td>
+<td><a class='r' onclick='return IPFS.View(this)' href='{#url}'>{#hash}</a></td>
+<td><i class='e_help'></i></td>
+<td class='r'></td>
+<td class='r leng'></td>
+<td class='br'><a href='{ipfsurl}' target='_blank'>ipfs.io</td>
+</tr>`
+    });
+  },
+
 
   www_setpgp: function(){
     ohelpc('setpgp','Set PGP keys',`
@@ -91,17 +75,16 @@ UPLOAD = {
 
 	const pgp_public_key = f5_read('pgp_public_key');
         if(pgp_public_key.indexOf('--BEGIN PGP PUBLIC KEY BLOCK--')>=0) {
+	  // Если прописан ключ
           try {
 	    // Читаем содержимое файла как ArrayBuffer
-	    // const fileContent = await UPLOAD.fileToBase64(file);
 	    const fileContent = await UPLOAD.fileToArrayBuffer(file);
 	    console.log('fileContent',fileContent);
 
 	    // Шифруем содержимое файла
-	    // const encryptedContent = await UPLOAD.encryptFile(fileContent, pgp_public_key);
 	    const encryptedContent = await UPLOAD.encryptBinaryFile(fileContent, pgp_public_key);
 	    console.log('encryptedContent',encryptedContent);
-	    // Создание нового объекта File
+	    // Замена объекта file
 	    file = new File(
 	        [encryptedContent], // Зашифрованное содержимое
 	        file.name + '.pgp',     // Добавляем расширение для обозначения шифрования
@@ -112,16 +95,16 @@ UPLOAD = {
 	  }
 	}
 
-	var o = await UPLOAD.save( file ); // , { type: file.type, name: file.name } );
+	var o = await UPLOAD.save( file );
 	console.log('o=',o);
 	clean('upload');
-	await relist();
-	UPLOAD.showhash(o.Hash);
+	await UPLOAD.relist();
+	UPLOAD.showhash(o.Hash); // Пометить новый файл зелененьким
   },
 
 
-  // Функция для конвертации файла в Base64
-  fileToArrayBuffer: function (file) {
+  // Функция для получения тела бинарного файла
+  fileToArrayBuffer: function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result);
@@ -130,10 +113,9 @@ UPLOAD = {
     });
   },
 
-
-    // Функция шифрования бинарного файла
+  // Функция шифрования бинарного файла
   encryptBinaryFile: async function(content, publicKeyArmored) {
-    await openpgp.initWorker({ path: 'openpgp.worker.min.js' }); // Инициализация воркера
+    // await openpgp.initWorker({ path: 'openpgp.worker.min.js' }); // Инициализация воркера - нахера?
 
     const publicKey = (await openpgp.key.readArmored(publicKeyArmored)).keys;
 
