@@ -62,7 +62,7 @@ find_tr: function(e) {
     if(!e) e=window.event.target;
     if(typeof(e)=='object') return (e.nodeName == 'TR' ? e : e.closest('TR') );
     if(typeof(e)!='string') return console.error("find_tr: not String");
-    var x=document.querySelector("TR[hash='"+e+"']"); if(x) return x;
+    var x=(dom('ipfs-list') || document).querySelector("TR[hash='"+e+"']"); if(x) return x;
     if(e.indexOf('://')<0) e=IPFS.endpoint+e;
     return dom('ipfs-list-table').querySelector("A[href='"+e+"']").closest('TR');
 },
@@ -96,13 +96,16 @@ Del: function(hash) {
     AJAX(IPFS.endpointRm,{
     callback:function(o){
 	console.log('Ok callback');
-	dier(o);
+	// dier(o);
+	salert('ok',300);
 	try {
 	    var j=JSON.parse(o).Pins;
 	    if(j.length!=1) do_catch_error();
 	    clean( IPFS.find_tr( j[0]) );
 	    clean('ipfs-view');
 	} catch(er){ alert('error: '+er); }
+
+	try { UPLOAD.DelMy(hash) } catch(er){}
     },
     onerror:function(o,u,s){
 	console.log('Error onerror');
@@ -117,7 +120,7 @@ Del: function(hash) {
 },
 
 // Методом HEAD получить content-type и 'content-length' и выполнить с ними заданную fn()
-Type: function(hash,fn) {
+Type: async function(hash,fn) {
     hash=IPFS.find_hash(hash);
 
     if(IPFS.type_cache && IPFS.type_cache[hash]) { // если есть в кеше
@@ -125,18 +128,39 @@ Type: function(hash,fn) {
 	return fn(hash,type,leng);
     }
 
-    AJAX(IPFS.endpoint+hash,{method:'HEAD',callback:function(o,url){
-	var type=this.getResponseHeader('content-type').replace(/;.+/g,'');
-	var leng=this.getResponseHeader('content-length');
+    try {
+        const response = await fetch(IPFS.endpoint+hash, { method: 'HEAD' });
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        // console.log('Response Headers:', [...response.headers.entries()]);
+	var type=response.headers.get('content-type').replace(/;.+/g,'');
+	var leng=response.headers.get('content-length');
+	var name=false;
 	if(leng===null) leng='';
+        // if(hash=='bafyb4iame7mlfhwxyd5vstfclifrnhzuzv22xkrysoghwg57yn3xe7u4sm') console.log(hash,type,leng);
 
+	if(type=='text/plain'||type=='application/pgp-encrypted') {
+            // Читаем первые 500 байт
+            const textResponse = await fetch(IPFS.endpoint+hash, { headers: { Range: 'bytes=0-1024' } }); // Заголовок для диапазона байт
+            if(!textResponse.ok && textResponse.status !== 206) throw new Error(`Failed to fetch range: ${textResponse.status}`);
+    	    const txt = await textResponse.text(); // Преобразуем ответ в текст
+	    if(txt.indexOf('--BEGIN PGP MESSAGE--')>=0) type='application/pgp-encrypted';
+	    name = ((txt.match(/\# PGP name\:\s*(.+)/) || [])[1]?.trim()) || null;
+
+/*
+# PGP name: 20241228-040144-599185061.png
+# PGP time: 28/12/2024 04:01:44 GMT+3
+# PGP date: 06/01/2025 15:43:59 GMT+3
+-----BEGIN PGP MESSAGE-----
+*/
+            // console.log('First 500 bytes:', txt);
+	}
 	if(IPFS.type_cache) {
 		IPFS.type_cache[hash]=[leng,type]; // запомним
 		f5_save('ipfs_type_cache',JSON.stringify(IPFS.type_cache));
 	}
-
-	fn(hash,type,leng);
-    }});
+	console.log(`fn(${hash},${type},${leng},${name});`);
+	fn(hash,type,leng,name);
+    } catch (er) { console.error('Error fetch:', er); }
 },
 
 // Веб-вьювер текстовых файлов
@@ -202,6 +226,7 @@ View: function(e,hash,name) {
         else if(type=='application/pdf') name='pdf';
 	else if(type=='text/rtf') name='rtf';
         else if(type.startsWith('text/')) name='txt';
+	else if(type=='application/pgp-encrypted') name='pgp';
 	else name='unknown';
     }
     IPFS.view_url(url,name);
@@ -255,6 +280,12 @@ view_url: function(url,name,type) { // type in [image video audio text document 
 	salert(h(name)+'<p>archive',1000);
     }
 
+
+    else if(type=='pgp') {
+	UPLOAD.View(url,name);
+	// alert(`p: ${url} ${name}`);
+    }
+
     else salert(h(name)+'<p>unknown type',1000);
 },
 
@@ -299,21 +330,21 @@ List: function(opt) {
 	    if(dom('ipfs-list')) dom('ipfs-list',o); else ohelpc('ipfs-list','IPFS files',o);
 
 	    for(var hash in j) {
-	        IPFS.Type(hash,function(hash,type,leng){
+	        IPFS.Type(hash,function(hash,type,leng,name){
 		    var tr=IPFS.find_tr(hash);
-		    if(!tr) { resolve('!tr'); return; }
+		    if(hash=='bafyb4iame7mlfhwxyd5vstfclifrnhzuzv22xkrysoghwg57yn3xe7u4sm')	    console.log(`tr
+hash='${hash}'
+type='${type}'
+leng='${leng}'
+name='${name}'
+`,hash,type,leng,name,tr);
+		    if(!tr) { console.log('!tr'); resolve('!tr'); return; }
+		    // console.log('table',tr.closest('table').closest('div').id);
 		    tr.setAttribute('content-type',type);
 		    tr.querySelector('TD.r').innerHTML=h(type);
 		    tr.querySelector('TD.leng').innerHTML=h(leng);
-		    var t=type.split('/')[0];
-		    var c = 'e_ledpurple'
-		    if(type=='text/plain') c='e_kontact_journal';
-		    else if(type=='text/html') c='e_kontact_notes';
-		    else if(t=='audio') c='e_ljvideo';
-		    else if(t=='video') c='e_play-youtube';
-		    else if(t=='image') c='e_image';
-		    else if(t=='document') c='e_filenew';
-		    tr.querySelector('I.e_help').className=c;
+		    tr.querySelector('I.e_help').className=IPFS.typec(type);
+		    if(name) tr.querySelector('TD.r').innerHTML=h(name);
 		});
 	    }
 
@@ -325,6 +356,18 @@ List: function(opt) {
     },{quiet:true,stream:true,type:"recursive"});
 
   });
+},
+
+
+typec: function(type) {
+    if(type=='text/plain') return 'e_kontact_journal';
+    if(type=='text/html') return 'e_kontact_notes';
+    var t=type.split('/')[0];
+    if(t=='audio') return 'e_ljvideo';
+    if(t=='video') return 'e_play-youtube';
+    if(t=='image') return 'e_image';
+    if(t=='document') return 'e_filenew';
+    return 'e_ledpurple'
 },
 
 save: function(s,opt){
