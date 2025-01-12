@@ -3,11 +3,20 @@
 IPFS={
 // wss://node-shave.zymologia.fi
 
+/*
 endpoint: 'https://ipfs.zymologia.fi/', // proxy_pass http://127.0.0.1:8181;
 endpoint_doc: 'https://ipfs.zymologia.fi/type_doc/', // proxy_pass http://127.0.0.1:8181;
 endpointSave: 'https://ipfs.zymologia.fi/OOO_Add_IDDQD', // proxy_pass http://127.0.0.1:5001/api/v0/add?hash=blake3;
 endpointRm: 'https://ipfs.zymologia.fi/OOO_Rm_IDDQD',
 endpointLs: 'https://ipfs.zymologia.fi/OOO_ls',
+*/
+
+endpoint: 'https://ipfs.lleo.me/', // proxy_pass http://127.0.0.1:8181;
+endpoint_doc: 'https://ipfs.lleo.me/type_doc/', // proxy_pass http://127.0.0.1:8181;
+endpointSave: 'https://ipfs.lleo.me/OOO_Add_IDDQD', // proxy_pass http://127.0.0.1:5001/api/v0/add?hash=blake3;
+endpointRm: 'https://ipfs.lleo.me/OOO_Rm_IDDQD',
+endpointLs: 'https://ipfs.lleo.me/OOO_ls',
+
 
 // сюда можно записать свою функцию при старте
 onready: function(){},
@@ -367,7 +376,19 @@ typec: function(type) {
     if(t=='video') return 'e_play-youtube';
     if(t=='image') return 'e_image';
     if(t=='document') return 'e_filenew';
-    return 'e_ledpurple'
+    return 'e_ledpurple';
+},
+
+
+typece: function(type) {
+    if(type=='text/plain') return '&#128220'; // 📜
+    if(type=='text/html') return '&#127760;'; // 🌐
+    var t=type.split('/')[0];
+    if(t=='audio') return '&#127925;'; // 🎵
+    if(t=='video') return '&#127909;'; // 🎥
+    if(t=='image') return '&#128444;&#65039;'; // 🖼️
+    if(t=='document') return '&#128196;'; // 📄
+    return '&#10024;'; // ✨
 },
 
 save: function(s,opt){

@@ -597,7 +597,7 @@ f_save=f5_save=l_save=function(k,v){
 };
 
 f5_read=l_read=function(k,def){
-    try { k=window.localStorage.getItem(k); return (!k && k!=="" && k!==0?(def||false):k); }
+    try { k=window.localStorage.getItem(k); return (!k && k!=="" && k!==0?def:k); }
     catch(e) { return err_store(e,arguments.callee.name); }
 };
 

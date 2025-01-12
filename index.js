@@ -213,49 +213,69 @@ UPLOAD = {
   },
 
   // Обработка файлов
-  file_ready: async function(files) {
-	console.log('FILES:', files);
-	console.log(files)
-        var file = files[0];
-        console.log('FILE:', file);
+  file_ready: async function(files) { files = UPLOAD.upfiles;
+	// console.log('FILES:', files);
 
-	const pgp_public_key = f5_read('pgp_public_key');
+	const zip = new JSZip();
+	for(const file of files) {
+    	    const content = await file.arrayBuffer(); // Читаем содержимое файла
+    	    zip.file(file.name, content); // Добавляем файл в архив
+	}
+	// Генерируем ZIP-файл
+	const zipBlob = await zip.generateAsync({ type: "blob" });
+
+/*
+        // Создаем ссылку для скачивания
+        const downloadLink = document.createElement("a");
+        downloadLink.href = URL.createObjectURL(zipBlob);
+        downloadLink.download = "files.zip";
+        downloadLink.click();
+	return;
+*/
+
+	const pgp_public_key = f5_read('pgp_public_key','');
+	console.log("pgp_public_key", pgp_public_key);
         if(pgp_public_key.indexOf('--BEGIN PGP PUBLIC KEY BLOCK--')>=0) {
 	  // Если прописан ключ
           try {
 	    // Читаем содержимое файла как ArrayBuffer
-	    const fileContent = await UPLOAD.fileToArrayBuffer(file);
-	    console.log('fileContent',fileContent);
+	    // const fileContent = await UPLOAD.fileToArrayBuffer(file);
+	    const fileContent = await zipBlob.arrayBuffer();
 
-	    // Шифруем содержимое файла
-//	    const encryptedContent = await UPLOAD.encryptBinaryFile(fileContent, pgp_public_key, 'file.name');
-
-
-            // Шифруем содержимое файла
+/*
             const encryptedContent = `# PGP name: ${file.name}
 # PGP time: ${new Date(file.lastModified).toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
 # PGP date: ${new Date().toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
-` + await UPLOAD.encryptBinaryFile(fileContent, pgp_public_key);
+`
+*/
+            const encryptedContent = `# PGP name: files.zip
+# PGP date: ${new Date().toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
+`
+	    + await UPLOAD.encryptBinaryFile(fileContent, pgp_public_key);
 
-	    console.log('encryptedContent',encryptedContent);
 	    // Замена объекта file
-	    file = new File(
+	    var file = new File(
 	        [encryptedContent], // Зашифрованное содержимое
-	        file.name + '.pgp',     // Добавляем расширение для обозначения шифрования
+	        // file.name + '.pgp',     // Добавляем расширение для обозначения шифрования
+		'files.pgp',     // Добавляем расширение для обозначения шифрования
 	        { type: 'application/pgp-encrypted' } // Устанавливаем MIME-тип
 	    );
+
 	  } catch(er) {
     		console.error('Ошибка при шифровании файла:', er);
+		return;
 	  }
+	} else {
+	    var file = new File([zipBlob], "files.zip", { type: zipBlob.type || "application/zip" });
 	}
 
-	var o = await UPLOAD.save( file );
+	var o = await UPLOAD.save( file ); // залили на IPFS
 	console.log('o=',o);
 
-        UPLOAD.AddMy(o.Hash);
-
-	clean('upload');
-	await UPLOAD.relist();
+	UPLOAD.upfiles = []; // сбросили массив
+	clean('upload'); // убрали окно ввода файлов
+        UPLOAD.AddMy(o.Hash); // добавили к своим файлам свеженький
+	await UPLOAD.relist(); // перегрузили нашуобщую таблицу
 	UPLOAD.showhash(o.Hash); // Пометить новый файл зелененьким
   },
 
@@ -272,10 +292,7 @@ UPLOAD = {
 
   // Функция шифрования бинарного файла
   encryptBinaryFile: async function(content, publicKeyArmored, comment) {
-    // await openpgp.initWorker({ path: 'openpgp.worker.min.js' }); // Инициализация воркера - нахера?
-
     const publicKey = (await openpgp.key.readArmored(publicKeyArmored)).keys;
-
     // Преобразуем бинарный файл в Uint8Array
     const binaryMessage = new Uint8Array(content);
 
@@ -287,7 +304,6 @@ UPLOAD = {
         message: openpgp.message.fromBinary(binaryMessage), // Создаем сообщение из бинарных данных
         publicKeys: publicKey, // Публичный ключ
 	armor: armor,
-	// comment: 'LLLLLLL' // Ваш комментарий
     });
 
     return armor ? encrypted.data : encrypted.message.packets.write(); // Возвращаем зашифрованные бинарные данные
@@ -322,22 +338,96 @@ save: function(file,opt){
 	<style>
 	    .filezone { border-radius: 8px; background-color: #f5f5f5; width: 448px; height: 160px; display: flex; align-items: center; justify-content: center; opacity: 0.8; }
 	    .fileactive { background-color: #f5fff5 !important; opacity: 1.0 !important; }
+    .textareaw {
+      align-self: stretch;
+      border-radius: 8px;
+      border: 1px solid #356bff;
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      justify-content: flex-start;
+      max-width: 100%;
+      min-height: 40px; /* Минимальная высота */
+      overflow: hidden;  /* Скрываем скролл */
+    }
+
+    .fn {
+	margin-top:3px;
+	font-size: 12px;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+    }
+
+    .fn_namea {
+	padding: 1px 10px 1px 10px;
+	border: 1px solid #ccc;
+	background-color: #eee;
+	border-radius: 15px;
+
+	display: flex;
+	align-items: center;
+	gap: 6px;
+
+	padding: 1px 10px 1px 10px;
+    }
+
+
+    .fn_name {
+	display: inline-block;
+	font-size: 12px;
+    }
+
+    .typeicon {
+	display: inline-block;
+	padding: -5px 10px -5px 5px;
+	font-size: 18px;
+	margin: -5px 0 -5px 0;
+    }
+
+    .delme {
+	display: inline-block;
+	font-size: 8px;
+    }
+
 	</style>
+
+	<div><textarea class='textareaw' placeholder='text message'></textarea></div>
 
 	<div class='filezone'>
             <img class="mv" src="img/download_2.svg" />
         </div>
-        <input name="zone" style='display:none' type="file" accept="*/*" />
+
+        <div><input name="zone" style='display:none' type="file" accept="*/*" multiple /></div>
+
+	<div class="fileplace"></div>
+
+        <p><div><input type='button' name="save" style='display:none' value="Save" /></div>
 	`);
 
 	const dropZone = dom('upload').querySelector(".filezone");
-	const inputZone = dom('upload').querySelector("input");
+	const inputZone = dom('upload').querySelector("input[name='zone']");
+	const inputSave = dom('upload').querySelector("input[name='save']");
+	const textArea = dom('upload').querySelector("textarea");
+	// const filePlace = dom('upload').querySelector(".fileplace");
+
+	textArea.addEventListener('input', (event) => {
+	    inputSave.style.display = (textArea.value == '' ? 'none' : 'block');
+	    // Сбрасываем высоту перед вычислением новой
+	    textArea.style.height = 'auto';
+	    // Устанавливаем высоту на основе прокручиваемой высоты
+    	    textArea.style.height = Math.min(textArea.scrollHeight, 300) + 'px';
+
+	    if(textArea.value) {
+		const file = new File([textArea.value], UPLOAD.textname, { type: "text/plain" });
+		UPLOAD.file_add([file]);
+	    } else UPLOAD.file_del(UPLOAD.textname);
+        });
 
 	// При выборе файлов через диалог
         inputZone.addEventListener('change', (event) => {
-	    console.log(event.type,event.target);
 	    dropZone.classList.add('fileactive');
-	    UPLOAD.file_ready( event.target.files );
+	    UPLOAD.file_add( event.target.files );
         });
 
 	// Событие dragover: предотвращаем стандартное поведение
@@ -358,21 +448,51 @@ save: function(file,opt){
 	    dropZone.classList.add('fileactive');
 
 	    const files = event.dataTransfer.files;
-	    if (files.length > 0) {
+	    if(files.length > 0) {
     		console.log('Dropped files:', files);
-	        UPLOAD.file_ready(files);
+		UPLOAD.file_add(files);
 	    } else {
     		console.warn('No files were dropped!');
 	    }
-
 	});
 
         dropZone.addEventListener('click', (event) => {
-	    console.log(event.type,event.target);
 	    inputZone.click();
 	});
-  }
+
+	inputSave.addEventListener('click', (event) => {
+	    UPLOAD.file_ready();
+	});
+
+  },
 
 
+  file_add: function(files) {
+
+	    if(files) Array.from(files).forEach(file => {
+	        const i = UPLOAD.upfiles.findIndex(f => f.name === file.name);
+	        if(i < 0) UPLOAD.upfiles.push(file); else UPLOAD.upfiles[i] = file;
+    	    });
+
+	    dom('upload').querySelector(".fileplace").innerHTML = UPLOAD.upfiles.map(x => `<div class='fn'>
+<div class='delme mv0' onclick="UPLOAD.file_del('${x.name}')">&#10060;</div>
+<div class='fn_namea'>
+    <div alt='${h(x.type)}' class='typeicon'>${IPFS.typece(x.type)}</div>
+    <div class='fn_name'>${x.name}</div>
+</div>
+${x.size}
+</div>`).join('');
+
+	    dom('upload').querySelector("input[name='save']").style.display = (UPLOAD.upfiles.length ? 'block' : 'none');
+  },
+
+  file_del: function(name) {
+	if(name === UPLOAD.textname) dom('upload').querySelector("textarea").value=''; // ибо нехуй! и понимания сути для.
+	UPLOAD.upfiles = UPLOAD.upfiles.filter(f => f.name !== name);
+	UPLOAD.file_add(false);
+  },
+
+  upfiles: [], // здесь будут файлы
+  textname: "message.txt", // так будет назван файл текста из формочки
 
 }
