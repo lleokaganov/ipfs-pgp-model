@@ -128,14 +128,21 @@ Del: function(hash) {
     }, {arg:hash} );
 },
 
+init_cache: function() {
+        try { IPFS.type_cache = JSON.parse(f5_read('ipfs_type_cache','')); } catch(er) { IPFS.type_cache={}; f5_save('ipfs_type_cache',"{}"); }
+},
+
 // Методом HEAD получить content-type и 'content-length' и выполнить с ними заданную fn()
 Type: async function(hash,fn) {
     hash=IPFS.find_hash(hash);
 
     if(IPFS.type_cache && IPFS.type_cache[hash]) { // если есть в кеше
-	var [leng, type] = IPFS.type_cache[hash];
-	return fn(hash,type,leng);
+	var [leng, type, name] = IPFS.type_cache[hash];
+	// console.log('cached ${hash}=(${leng}) ${type}: ',IPFS.type_cache[hash]);
+	return fn(hash,type,leng,name);
     }
+
+	// console.log('fetch ${hash}');
 
     try {
         const response = await fetch(IPFS.endpoint+hash, { method: 'HEAD' });
@@ -164,10 +171,10 @@ Type: async function(hash,fn) {
             // console.log('First 500 bytes:', txt);
 	}
 	if(IPFS.type_cache) {
-		IPFS.type_cache[hash]=[leng,type]; // запомним
+		IPFS.type_cache[hash]=[leng,type,name]; // запомним
 		f5_save('ipfs_type_cache',JSON.stringify(IPFS.type_cache));
 	}
-	console.log(`fn(${hash},${type},${leng},${name});`);
+	// console.log(`fn(${hash},${type},${leng},${name});`);
 	fn(hash,type,leng,name);
     } catch (er) { console.error('Error fetch:', er); }
 },
@@ -211,7 +218,6 @@ viewer_iframe: function(name,url) {
 
 // Вьювер всех файлов (для текстовых вызовет ViewFile)
 View: function(e,hash,name) {
-
     if(!e) e=window.event.target;
     else if(e && e.target) e=e.target;
 
@@ -225,19 +231,7 @@ View: function(e,hash,name) {
 	name=e.getAttribute('name');
     }
     var url=IPFS.endpoint+hash;
-    if(!name) {
-        var type=e.getAttribute('content-type') || 'text/plain';
-        if(type.startsWith('audio/')) name='mp3';
-	else if(type.startsWith('video/')) name='mp4';
-        else if(type.startsWith('image/')) name='jpg';
-        else if(type=='application/msword') name='doc';
-        else if(type=='application/x-ole-storage') name='doc';
-        else if(type=='application/pdf') name='pdf';
-	else if(type=='text/rtf') name='rtf';
-        else if(type.startsWith('text/')) name='txt';
-	else if(type=='application/pgp-encrypted') name='pgp';
-	else name='unknown';
-    }
+    if(!name) name = IPFS.mime2name( e.getAttribute('content-type') || 'text/plain' );
     IPFS.view_url(url,name);
     return false;
 },
@@ -245,36 +239,34 @@ View: function(e,hash,name) {
 view_url: function(url,name,type) { // type in [image video audio text document archive]
     if(!name) name=url;
     if(!type) type = name.split('.').pop().toLowerCase();
+    if(type.indexOf('/')>=0) type=IPFS.mime2name(type);
 
-    if(['jpg', 'gif', 'png', 'webp', 'jpeg', 'svg'].includes(type)) {
-	IPFS.viewer(name, mpers(`<img src="{#url}" style="max-width:100%;max-height:100%" onload="center('ipfs-view','max')">`,{url: url}) );
+    if(['jpg', 'gif', 'png', 'webp', 'jpeg', 'svg'].includes(type)) { // даже если blob://, разберись сам
+	return IPFS.viewer(name, mpers(`<img src="{#url}" style="max-width:100%;max-height:100%" onload="center('ipfs-view','max')">`,{url: url}) );
     }
 
-    else if(['mp3', 'ogg', 'wav', 'm4a'].includes(type)) {
-	changemp3x(url+'?type=.mp3',name);
+    if(['mp3', 'ogg', 'wav', 'm4a'].includes(type)) {
+	return changemp3x(url+'?type=.mp3',name);
     }
 
-    else if (['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'avi'].includes(type)) {
-	changemp3x(url+'?type=.mp4',name);
+    if(['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'avi'].includes(type)) {
+	return changemp3x(url+'?type=.mp4',name);
     }
 
-    else if (['rtf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'pps', 'ppt'].includes(type)) {
+    if(['rtf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'pps', 'ppt'].includes(type)) {
+	if(url.startsWith('blob:')) return IPFS.download(url,name); // внутренние ссылки скачиваем
 	url = url.replace(IPFS.endpoint, IPFS.endpoint_doc);
-	url = "https://docs.google.com/gview?embedded=true&url="+encodeURIComponent(url);
-	IPFS.viewer_iframe(name,url);
+	return IPFS.viewer_iframe(name, "https://docs.google.com/gview?embedded=true&url="+encodeURIComponent(url) );
     }
 
-    else if(type=='pdf') {
-        // Браузер умеет PDF сам?
-        if( window.navigator && window.navigator.pdfViewerEnabled ) IPFS.viewer_iframe(name,url);
-	else {
-	    url = "https://docs.google.com/gview?embedded=true&url="+encodeURIComponent(url);
-	    IPFS.viewer_iframe(name,url);
-	}
+    if(type=='pdf') {
+        if( window.navigator && window.navigator.pdfViewerEnabled ) return IPFS.viewer_iframe(name,url); // Браузер умеет PDF сам
+	if(url.startsWith('blob:')) return IPFS.download(url,name); // внутренние ссылки скачиваем
+	return IPFS.viewer_iframe(name, "https://docs.google.com/gview?embedded=true&url="+encodeURIComponent(url) );
     }
 
-    else if(type=='txt') {
-        AJAX(url,function(o){
+    if(type=='txt') {
+        AJAX(url,function(o){ // даже если blob://, разберись сам
 	    o = h(o);
 	    o = obracom('\n'+o+'\n').trim();
 	    o = o.replace(/\n/g,'<br>');
@@ -283,20 +275,69 @@ view_url: function(url,name,type) { // type in [image video audio text document 
 	    if(o.length > 4096) o="<div class='br'>"+o+"</div>";
 	    IPFS.viewer(name, o);
 	});
+	return;
     }
 
-    else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(type)) {
-	salert(h(name)+'<p>archive',1000);
+//    if(['zip', 'rar', '7z', 'tar', 'gz'].includes(type)) {
+//	// TODO
+//	salert(h(name)+'<p>archive',1000);
+//    }
+
+    if(type=='pgp') {
+	return UPLOAD.View(url,name);
     }
 
-
-    else if(type=='pgp') {
-	UPLOAD.View(url,name);
-	// alert(`p: ${url} ${name}`);
-    }
-
-    else salert(h(name)+'<p>unknown type',1000);
+    if(confirm(`Download?\n\nFile: ${name}\n\nType: ${type}`)) IPFS.download(url,name);
 },
+
+
+name2mime: function(name) {
+    var r = name.split('.').pop().toLowerCase();
+    // Текстовые форматы
+    if (['txt', 'c', 'rs', 'js', 'css', 'conf'].includes(r)) return 'text/plain';
+    if (['htm', 'html', 'shtml'].includes(r)) return 'text/html';
+    // Изображения
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(r)) return 'image/' + r;
+    if (['svg'].includes(r)) return 'image/svg+xml';
+    // Видео
+    if (['mp4', 'mkv', 'webm', 'avi'].includes(r)) return 'video/' + r;
+    if (['mov'].includes(r)) return 'video/quicktime';
+    // Аудио
+    if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(r)) return 'audio/' + r;
+    // Архивы
+    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(r)) return 'application/x-compressed';
+    // PDF и документы
+    if (['pdf'].includes(r)) return 'application/pdf';
+    if (['doc', 'docx'].includes(r)) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (['xls', 'xlsx'].includes(r)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    if (['ppt', 'pptx'].includes(r)) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    // Программы и исполняемые файлы
+    // if(['exe', 'msi'].includes(r)) return 'application/vnd.microsoft.portable-executable';
+    // if(['apk'].includes(r)) return 'application/vnd.android.package-archive';
+    // if(['jar'].includes(r)) return 'application/java-archive';
+    // XML и JSON
+    if (['xml'].includes(r)) return 'application/xml';
+    if (['json'].includes(r)) return 'application/json';
+    // Дефолтный MIME-тип
+    return 'application/octet-stream';
+},
+
+mime2name: function(type) {
+        if(type.startsWith('audio/')) return 'mp3';
+	if(type.startsWith('video/')) return 'mp4';
+        if(type.startsWith('image/')) return 'jpg';
+        if(type=='application/msword'
+	    || type=='application/x-ole-storage'
+	    || type.startsWith('application/vnd.openxmlformats-officedocument')
+	) return 'doc';
+        if(type=='application/pdf') return 'pdf';
+	if(type=='text/rtf') return 'rtf';
+        if(type.startsWith('text/')) return 'txt';
+	if(type=='application/pgp-encrypted') return 'pgp';
+	return 'unknown';
+},
+
+
 
 
 // Веб-эксплорер файлов ipfs
@@ -317,6 +358,7 @@ List: function(opt) {
 		+"<td>{type}</td>"
 		+"<td class='br'><a href='{ipfsurl}' target='_blank'>ipfs.io</td>"
 		+"</tr>";
+
 
 	    for(var hash in j) {
 		var type = j[hash].Type;
@@ -341,13 +383,10 @@ List: function(opt) {
 	    for(var hash in j) {
 	        IPFS.Type(hash,function(hash,type,leng,name){
 		    var tr=IPFS.find_tr(hash);
-		    if(hash=='bafyb4iame7mlfhwxyd5vstfclifrnhzuzv22xkrysoghwg57yn3xe7u4sm')	    console.log(`tr
-hash='${hash}'
-type='${type}'
-leng='${leng}'
-name='${name}'
-`,hash,type,leng,name,tr);
 		    if(!tr) { console.log('!tr'); resolve('!tr'); return; }
+
+		    if( opt?.nameonly && !name ) clean(tr);
+
 		    // console.log('table',tr.closest('table').closest('div').id);
 		    tr.setAttribute('content-type',type);
 		    tr.querySelector('TD.r').innerHTML=h(type);
@@ -390,6 +429,18 @@ typece: function(type) {
     if(t=='document') return '&#128196;'; // 📄
     return '&#10024;'; // ✨
 },
+
+  // универсальная процедура скачивания на диск
+  download: function(link, name='downloaded_file.dat') {
+        if(typeof link != 'string') link = URL.createObjectURL(new Blob([link], { type: 'application/octet-stream' }));
+        const e = document.createElement('a');
+        e.href = link;
+        e.download = name;
+        document.body.appendChild(e);
+        e.click();
+        document.body.removeChild(e);
+        if(link.startsWith('blob:')) URL.revokeObjectURL(link);
+  },
 
 save: function(s,opt){
     return new Promise(function(resolve, reject) {

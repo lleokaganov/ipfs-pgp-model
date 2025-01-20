@@ -268,49 +268,45 @@ function bukadump() { // отладочник
     dom('bukadump',dom.s('bukadump')+'<hr>'+s);
 }
 
-var LOADES={};
-
 function inject(src){ loadScr(urlajax(src)); }
 
 function urlajax(s,dir) { return ( s.indexOf('://')<0 && s.substring(0,1) != '/' ? (dir?dir:www_ajax)+s : s ); }
 
 // умная подгрузка
 // первый аргумент - имя файлы js или css или массив ['1.js','2.js','1.css']
-// второй необязательный аргумент - фанкция, запускаемая по окончании удачной загрузке ВСЕХ перечисленных
-// третий необязательный - функция при ошибке
-function LOADS(u,f,err,sync) { if(typeof(u)=='string') u=[u];
-
-    var s;
-    for(var i=0;i<u.length;i++) { if(LOADES[u[i]]) continue;
-     if(/\.css($|\?.+?$)/.test(u[i])) {
-        s=document.createElement('link');
-        s.type='text/css';
-        s.rel='stylesheet';
-        s.href=u[i];
-        s.media='screen';
-     } else {
-        s=document.createElement('script');
-        s.type='text/javascript';
-        s.src=u[i];
-        s.defer = true;
-     }
-     s.setAttribute('orign',u[i]);
-     if(sync) s.async=false;
-     s.onerror=( typeof(err)=='function' ? err : function(e){ idie('Not found: '+e.src); } );
-     s.onload=function(e){ e=e.target;
-        var k=1; LOADES[e.getAttribute('orign')]=1; for(var i=0;i<u.length;i++){ if(!LOADES[u[i]]){ k=0;break;}}
-        if(k){ ajaxoff(); if(f) f(e.src); }
-     };
-     document.getElementsByTagName('head').item(0).appendChild(s);
-    }
-    if(s) ajaxon(); else if(f) f(1);
+// второй необязательный аргумент - функция, запускаемая по окончании удачной загрузки ВСЕХ перечисленных
+// третий необязательный - функция при ошибке каждого из
+// четвертый (sync) устаналивать в true, если важен порядок загрузки
+// LOADS('1.js',function(){Удачно});
+// LOADS(['1.js','2.css'],function(){ SUCCESS!},function(){ERROR!},sync);
+// с ожиданием: await LOADS_promice(['1.js','2.css'],sync); // start end loaded
+const LOADES={};
+function LOADS(urls, onSuccess, onError, sync) {
+    if(typeof urls === 'string') urls = [urls];
+    urls = urls.filter(url => !LOADES[url]); // Отфильтруем уже загруженные
+    if(!urls.length) return onSuccess ? onSuccess() : true; // Если нечего загружать, сразу успех
+    const urls2 = [...urls];
+    urls.forEach(url => {
+        const attr = /\.css($|\?.+?$)/.test(url)
+            ? { elname:'link', href:url, type:'text/css', rel:'stylesheet', media:'screen'}
+            : { elname:'script', src:url, type:'text/javascript', defer: true};
+        const el = document.createElement(attr.elname);
+        for(const [a,b] of Object.entries(attr)) el.setAttribute(a,b);
+        if(sync) el.async = false; // Управляем асинхронностью для скриптов
+        el.onerror = (e) => {
+            onError ? onError(url,e) : console.error(`Failed to load: ${url}`);
+        };
+        el.onload = () => {
+            LOADES[url] = 1;
+            urls2.splice(urls2.indexOf(url),1);
+            if(!urls2.length) { ajaxoff(); if(onSuccess) onSuccess(); }
+        };
+        document.head.appendChild(el);
+    });
+    ajaxon();
 }
-
-function LOADS_sync(u,f,err) { LOADS(u,f,err,1) }
-
-LOADS_promice=include=function(file,sync) {
-    return new Promise(function(resolve, reject) { LOADS(file,resolve,reject,sync); });
-};
+LOADS_sync=function(urls,onSuccess,onError) { LOADS(urls,onSuccess,onError,1) }
+LOADS_promice=include=function(urls,sync) { return new Promise(function(resolve,reject){ LOADS(urls,resolve,reject,sync) }); };
 
 // создать новый <DIV class='cls' id='id'>s</div> в элементе paren (если не указан - то просто в документе)
 // если указан relative - то следующим за relative

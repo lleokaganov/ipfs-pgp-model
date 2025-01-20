@@ -1,498 +1,257 @@
+PINGER={
+    mname: 'listMessage',
 
-function INIT() {
+    www_animate: function(id) {
+	const div = document.querySelector(`.mymail[pid='${id}']`);
+        if(!div) return;
+        div.classList.add('animate');
+        setTimeout(() => { div.classList.remove('animate'); }, 2000);
+    },
+
+    www_check: async function() {
+	ajaxon();
+	await IPFS_need();
+	var R = await PINGER.read(DOT.current_acc.acc);
+	Object.entries(R).forEach(([id, time]) => { PINGER.add_mail(id,time); });
+	if(Object.entries(R).length) plays('img/bbm_tone.mp3',2);
+	dom('mail_work',PINGER.list_new_mail() );
+	ajaxoff();
+    },
+
+    fake_save: async function() {
+	const account = '14ETeSygHv2VBQJSQuBWnzf1TujhfvxehcXHqEdEPxJqRw6o';
+	const hexChars = '0123456789abcdef';
+	let hash='0x'; for(let i=0; i<64; i++) hash += hexChars[Math.floor(Math.random() * hexChars.length)];
+        await PINGER.save(account, hash);
+    },
+
+    api: async function(url) {
+    	const r = await fetch(url,{method:'GET'});
+        if(r.ok) return await r.text();
+    },
+
+    // https://site.lleo.me/ipfs-pgp-model5/pinger.php?action=save&account=14ETeSygHv2VBQJSQuBWnzf1TujhfvxehcXHqEdEPxJqRw6o&hash=0x01010101010101010101010101010101010101010101010101010
+    save: async function(account,hash) {
+	const r = await PINGER.api(`pinger.php?action=save&account=${account}&hash=${hash}`);
+	return r == 'OK';
+    },
+
+    // https://site.lleo.me/ipfs-pgp-model5/pinger.php?action=read&account=14ETeSygHv2VBQJSQuBWnzf1TujhfvxehcXHqEdEPxJqRw6o
+    read: async function(account,hash) {
+	var r = await PINGER.api(`pinger.php?action=read&account=${account}`);
+	try { return JSON.parse(r); } catch(er){ return false; }
+    },
+
+
+    readList: function(){
+	try { return JSON.parse(f5_read(PINGER.mname,'')); } catch(er){ return []; }
+    },
+
+    saveList: function(r){
+	try { f5_save(PINGER.mname,JSON.stringify(r)); } catch(er){}
+    },
+
+    add_mail: function(id,time) {
+	var r = PINGER.readList();
+	const item = r.find(x => x[0] === id);
+        if(item) item[1] = time;
+	else r.push([id,time,false]);
+	PINGER.saveList(r);
+	setTimeout(()=>{PINGER.www_animate(id);},10);
+    },
+
+    old_mail: function(id) {
+	var r = PINGER.readList();
+	const item = r.find(x => x[0] === id);
+        if(item) item[2] = true;
+	PINGER.saveList(r);
+    },
+
+    del_mail: async function(x) {
+	// Удалить с IPFS
+	try { IPFS.Del(IPFS.hex2cid(x)); } catch(er){}
+	// Удалить из массива почты
+	var r = PINGER.readList();
+	r = r.filter(p => p[0] != x);
+	PINGER.saveList(r);
+    },
+
+    list_new_mail: function() {
+	var r = PINGER.readList();
+	r = r.filter(x => x[2] === false);
+	return PINGER.list_all_mail(r);
+    },
+
+    list_all_mail: function(r) {
+	if(!r) r = PINGER.readList();
+        return r.map(x => {
+	    return `<div class='mymail' pid='${x[0]}'>
+<span class="mv" onclick="PINGER.del_mail('${x[0]}');clean(this.parentNode);">❌</span>
+<span style='font-size:22px;' class='mv0'>${x[2]?'✉':'📧'}</span>
+<a href='${IPFS.hex2url(x[0])}' target='_blank' onclick="PINGER.old_mail('${x[0]}'); UPLOAD.View('${IPFS.hex2url(x[0])}'); return false;">${unixtime2str(x[1])}</a>
+</div>`;
+        }).join('\n');
+    },
+
+};
+
+
+async function INIT() {
     nonav = 1;
-    IPFS.onready = async function(){
 
-	try { IPFS.type_cache = JSON.parse(f5_read('ipfs_type_cache')); } catch(er) {} // включим кэш
-	IPFS.type_cache = IPFS.type_cache || {};
-
-IPFS.type_cache = false;
-
-        dom('work',`
-
-<input type='button' value='Upload new file' onclick="UPLOAD.win()">
-<input type='button' value='Set PGP Keys' onclick="UPLOAD.www_setpgp()">
-
-		<p><div id='ipfs-my-list'></div>
-		<div class='ll mv0 r' onclick='UPLOAD.www_addurl()'>add url</div>
-
-		<p><div id='ipfs-list'><div class='ll' onclick='UPLOAD.relist()'>View all</div></div>
-	`);
-//	var o = await UPLOAD.relist();
-	var o = await UPLOAD.relist_my();
-    };
-    IPFS.init();
-}
-
-
-UPLOAD = {
-
-  View: async function(url, name) {
-    try {
-        // 1. Скачать файл
-        const response = await fetch(url);
-        if(!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-        const encryptedText = await response.text(); // Читаем содержимое как текст
-
-	const name = ((encryptedText.match(/\# PGP name\:\s*(.+)/) || [])[1]?.trim()) || null;
-	console.log('Extracted name:', name);
-
-	// 3. Распаковать файл PGP
-	const decryptedContent = await UPLOAD.decryptPGPFile(encryptedText);
-	if(typeof(decryptedContent)=='string') return idie(h(decryptedContent));
-
-        // 3. Создать Blob и ссылку для скачивания
-        const blob = new Blob([decryptedContent], { type: 'application/octet-stream' });
-        const downloadLink = document.createElement('a');
-        downloadLink.href = URL.createObjectURL(blob);
-        downloadLink.download = name || 'decrypted_pgp_file';
-        downloadLink.click();
-    } catch (error) { console.error('Error in View:', error); }
-  },
-
-  // Функция для расшифровки PGP файла
-  decryptPGPFile: async function(encryptedContent) {
-   try {
-
-    if(encryptedContent.indexOf('--BEGIN PGP MESSAGE--')<0) return 'Error: no PGP content';
-
-    const privateKeyArmored = f5_read('pgp_private_key','');
-    if(privateKeyArmored.indexOf('--BEGIN PGP PRIVATE KEY BLOCK--')<0) return 'Error: no public key';
-
-    var passphrase = f5_read('pgp_password','');
-    if(passphrase=='') passphrase = await UPLOAD.www_pgppassword();
-
-    // '-----BEGIN PGP PRIVATE KEY BLOCK-----\n...'; // Ваш приватный ключ
-    // const passphrase = '1'; // your_passphrase'; // Пароль для приватного ключа
-    // Читаем приватный ключ
-    const { keys: [privateKey] } = await openpgp.key.readArmored(privateKeyArmored);
-    await privateKey.decrypt(passphrase);
-    // 2. Расшифровываем PGP-сообщение
-    const encryptedMessage = await openpgp.message.readArmored(encryptedContent); // Для текстового формата
-    const { data: decryptedContent } = await openpgp.decrypt({
-        message: encryptedMessage,
-        privateKeys: [privateKey],
-        format: 'binary' // Указываем бинарный формат
-    });
-    // return decryptedContent;
-    return new Uint8Array(decryptedContent); // Преобразуем данные в Uint8Array
-   } catch(er) {
-	return 'Error decoding: '+er;
-   }
-  },
-
-
-  relist_my: async function(){ // upload file list
-    dom('ipfs-my-list','');
-	try { IPFS.myfiles = JSON.parse(f5_read('ipfs_myfiles')); } catch(er) {} // включим кэш
-	IPFS.myfiles = IPFS.myfiles || [];
-	dom('ipfs-my-list',mpers(`
-<table border='0' cellpadding='2' cellspacing='0' id='ipfs-my-list-table'>
-{for(myfiles):
-<tr hash='{#hash}' content-type='{#type}'>
-<td>{i}</td>
-<td><i alt='Delete from my' onclick='UPLOAD.DelMy()' class='e_cancel1 mv'></i></td>
-<td><i alt='Delete' onclick='IPFS.Del(this)' class='e_cancel mv'></i></td>
-<td><a class='r' onclick='return IPFS.View(this)' href='`+IPFS.endpoint+`{#hash}'>{#hash}</a></td>
-<td><div>{case(name):
-{false:}
-{*:{#name}}
-}</div><div class='br'>{#type}</div></td>
-<td class='r leng'>{#leng}</td>
-<td class='br'><a href='https://ipfs.io/ipfs/{#hash}' target='_blank'>ipfs.io</a></td>
-</tr>
-}
-</table>
-`,{myfiles:IPFS.myfiles}));
-
-  },
-
-  DelMy: function(hash){
-    hash = hash || IPFS.find_tr().getAttribute('hash');
-    IPFS.myfiles = IPFS.myfiles.filter(item => item.hash !== hash);
-    f5_save('ipfs_myfiles',JSON.stringify(IPFS.myfiles));
-    UPLOAD.relist_my();
-  },
-
-  AddMy: function(hash){
-    IPFS.Type(hash,function(hash,type,leng,name){
-	IPFS.myfiles.push({hash:hash,type:type,leng:leng,name:name});
-        f5_save('ipfs_myfiles',JSON.stringify(IPFS.myfiles));
-        UPLOAD.relist_my();
-    });
-  },
-
-  copytomy: function(){
-    var hash=IPFS.find_tr().getAttribute('hash');
-    if(dom('ipfs-my-list-table').querySelector("TR[hash='"+hash+"']")) return;
-    UPLOAD.AddMy(hash);
-  },
-
-  relist: async function(){ // upload file list
-    dom('ipfs-list','');
-    return await IPFS.List({
-	    type:"exist",
-	    table_template: "<table border='0' cellpadding='2' cellspacing='0' id='ipfs-list-table'>{table}</table>",
-	    template: `<tr hash='{#hash}'>
-<td>{i}</td>
-<td><i alt='Delete' onclick='IPFS.Del(this)' class='e_cancel mv'></i></td>
-<td><a class='r' onclick='return IPFS.View(this)' href='{#url}'>{#hash}</a></td>
-<td><i class='e_help'></i></td>
-<td class='r'></td>
-<td class='r leng'></td>
-<td class='br'><a href='{#ipfsurl}' target='_blank'>ipfs.io</a></td>
-<td class='br mv0' onclick='UPLOAD.copytomy()'>&#x2398;</td>
-</tr>`
-    });
-  },
-
-
-  www_setpgp: function(){
-
-   return new Promise(function(resolve, reject) {
-
-    ohelpc('setpgp','Set PGP keys',`
+    dom('work',`
 <style>
-.pgp_public_key,.pgp_private_key { width:600px !important; height:100px; }
+    /* Анимация: мигание фона */
+    .mymail {
+        transition: background-color 0.5s ease;
+    }
+    .mymail.animate {
+	background-color: yellow; /* Цвет при анимации */
+	animation: pulse 2s infinite; /* Анимация с повторением */
+    }
+    /* Ключевые кадры для эффекта мигания */
+    @keyframes pulse {
+	0% { background-color: yellow; }
+        50% { background-color: orange; }
+        100% { background-color: yellow; }
+    }
+
+    .log_console {
+	margin:10px 0 10px 0;
+        max-height: 150px; /* Максимальная высота элемента */
+        overflow-y: auto; /* Включаем вертикальную прокрутку при превышении max-height */
+        height: auto; /* Автоматическая высота для подстройки под содержимое */
+        white-space: pre-wrap; /* Сохраняем перенос строк и пробелы */
+        word-wrap: break-word; /* Перенос длинных слов */
+        border: 1px solid #ccc; /* Для визуального отображения элемента */
+        padding: 10px; /* Внутренние отступы */
+        box-sizing: border-box; /* Учитываем отступы и границы в общей высоте */
+	background-color: #f9f6d5;
+	border-radius: 5px;
+	font-size: 11px;
+    }
+
+
+
+/* Стили для общего блока */
+.acc_card {
+    display: flex;
+    align-items: center;
+    border: 1px solid #ddd;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    padding: 6px;
+    background-color: #d8eaea;
+    max-width: 350px;
+    margin-bottom: 6px;
+}
+
+/* Стили для текстового содержимого */
+.acc_content {
+    margin-left: 6px;
+    display: flex;
+    flex-direction: column; /* Расположение текста друг под другом */
+    justify-content: center; /* Выравнивание по вертикали */
+}
+
+/* Стили для заголовка */
+.acc_title {
+    font-size: 14px; /* Размер шрифта */
+    font-weight: bold; /* Полужирный текст */
+}
+
+/* Стили для описания */
+.acc_id {
+    font-size: 10px; /* Размер текста для описания */
+    color: #555; /* Серый цвет текста */
+}
+
 </style>
-<p>PGP PUBLIC KEY:
-<div><textarea class='pgp_public_key'>${f5_read('pgp_public_key')||''}</textarea></div>
-<p>PGP PRIVATE KEY:
-<div><textarea class='pgp_private_key'>${f5_read('pgp_private_key')||''}</textarea></div>
-<p>PGP PASSWORD (optional): <input class='pgp_password' 4width='60' value='${f5_read('pgp_password')||''}'>
-<div><input type='button' value='Save'></div>
-`);
-
-    var q=dom('setpgp');
-    q.querySelector("input[type='button']").addEventListener('click', (event,x) => {
-	    x='pgp_public_key'; f5_save(x,q.querySelector("textarea."+x).value);
-	    x='pgp_private_key'; f5_save(x,q.querySelector("textarea."+x).value);
-	    x='pgp_password'; f5_save(x,q.querySelector("input."+x).value);
-	    clean(q);
-            resolve(); // Если сервер возвращает JSON
-    });
-
-   });
-  },
 
 
-  www_pgppassword: function(){
-
-   return new Promise(function(resolve, reject) {
-
-    ohelpc('pgp_password','Input PGP password',`<input type='text' width='60' class='pgp_password'> <input type='button' value='GO'>`);
-
-    var q=dom('pgp_password');
-    q.querySelector("input[type='button']").addEventListener('click', (event,x) => {
-	    clean(q);
-            resolve(q.querySelector("input.pgp_password").value);
-    });
-
-   });
-  },
-
-
-  www_addurl: async function(){
-    ohelpc('add_url','Add Url',`<input type='text' width='120' class='ipfs_url' placeholder='hash bafy12345... or url http://ipfs.io/...'> <input type='button' value='ADD'>`);
-    var q=dom('add_url');
-    q.querySelector("input[type='button']").addEventListener('click', (event,x) => {
-	    var s = q.querySelector("input.ipfs_url").value; // 'https://ipfs.io/ipfs/bafkr4igsi2qphrykg2p5u5dimtdgn5cdglaid3xwf3uz5cylfdwgilxqhe';
-	    // Регулярное выражение для поиска IPFS-хэша
-	    var match = s.match(/\b(Qm[1-9A-HJ-NP-Za-km-z]{44}|baf[a-zA-Z0-9]{46,59})\b/);
-	    var hash = match ? match[0] : null;
-	    if(!hash) return salert('wrong hash',1000);
-	    clean(q);
-            UPLOAD.AddMy(hash);
-    });
-  },
-
-  showhash: function(hash){
-    var ee=false;
-    dom("ipfs-list-table").querySelectorAll("TR[hash='"+hash+"']").forEach(e=>{ ee=e; e.style.backgroundColor='green';});
-    if(ee) ee.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  },
-
-  // Обработка файлов
-  file_ready: async function(files) { files = UPLOAD.upfiles;
-	// console.log('FILES:', files);
-
-	const zip = new JSZip();
-	for(const file of files) {
-    	    const content = await file.arrayBuffer(); // Читаем содержимое файла
-    	    zip.file(file.name, content); // Добавляем файл в архив
-	}
-	// Генерируем ZIP-файл
-	const zipBlob = await zip.generateAsync({ type: "blob" });
-
-/*
-        // Создаем ссылку для скачивания
-        const downloadLink = document.createElement("a");
-        downloadLink.href = URL.createObjectURL(zipBlob);
-        downloadLink.download = "files.zip";
-        downloadLink.click();
-	return;
-*/
-
-	const pgp_public_key = f5_read('pgp_public_key','');
-	console.log("pgp_public_key", pgp_public_key);
-        if(pgp_public_key.indexOf('--BEGIN PGP PUBLIC KEY BLOCK--')>=0) {
-	  // Если прописан ключ
-          try {
-	    // Читаем содержимое файла как ArrayBuffer
-	    // const fileContent = await UPLOAD.fileToArrayBuffer(file);
-	    const fileContent = await zipBlob.arrayBuffer();
-
-/*
-            const encryptedContent = `# PGP name: ${file.name}
-# PGP time: ${new Date(file.lastModified).toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
-# PGP date: ${new Date().toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
-`
-*/
-            const encryptedContent = `# PGP name: files.zip
-# PGP date: ${new Date().toLocaleString('en-GB',{timeZoneName:'short'}).replace(',','')}
-`
-	    + await UPLOAD.encryptBinaryFile(fileContent, pgp_public_key);
-
-	    // Замена объекта file
-	    var file = new File(
-	        [encryptedContent], // Зашифрованное содержимое
-	        // file.name + '.pgp',     // Добавляем расширение для обозначения шифрования
-		'files.pgp',     // Добавляем расширение для обозначения шифрования
-	        { type: 'application/pgp-encrypted' } // Устанавливаем MIME-тип
-	    );
-
-	  } catch(er) {
-    		console.error('Ошибка при шифровании файла:', er);
-		return;
-	  }
-	} else {
-	    var file = new File([zipBlob], "files.zip", { type: zipBlob.type || "application/zip" });
-	}
-
-	var o = await UPLOAD.save( file ); // залили на IPFS
-	console.log('o=',o);
-
-	UPLOAD.upfiles = []; // сбросили массив
-	clean('upload'); // убрали окно ввода файлов
-        UPLOAD.AddMy(o.Hash); // добавили к своим файлам свеженький
-	await UPLOAD.relist(); // перегрузили нашуобщую таблицу
-	UPLOAD.showhash(o.Hash); // Пометить новый файл зелененьким
-  },
-
-
-  // Функция для получения тела бинарного файла
-  fileToArrayBuffer: function(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
-    });
-  },
-
-  // Функция шифрования бинарного файла
-  encryptBinaryFile: async function(content, publicKeyArmored, comment) {
-    const publicKey = (await openpgp.key.readArmored(publicKeyArmored)).keys;
-    // Преобразуем бинарный файл в Uint8Array
-    const binaryMessage = new Uint8Array(content);
-
-    const armor = true; // Включаем текстовую броню для сохранения бинарного формата
-    // const armor = false; // Отключаем текстовую броню для сохранения бинарного формата
-
-    // Шифруем бинарное содержимое
-    const encrypted = await openpgp.encrypt({
-        message: openpgp.message.fromBinary(binaryMessage), // Создаем сообщение из бинарных данных
-        publicKeys: publicKey, // Публичный ключ
-	armor: armor,
-    });
-
-    return armor ? encrypted.data : encrypted.message.packets.write(); // Возвращаем зашифрованные бинарные данные
-  },
-
-
-save: function(file,opt){
-
-    const formData = new FormData();
-    formData.append('file', file); // 'file' — имя поля, ожидаемого сервером
-    return new Promise(function(resolve, reject) {
-	// Отправляем файл на сервер
-	fetch(IPFS.endpointSave, { method: 'POST', body: formData })
-        .then((response) => {
-            if(!response.ok) throw new Error('Network response was not ok ' + response.statusText);
-            resolve(response.json()); // Если сервер возвращает JSON
-        })
-        .then((data) => {
-            console.log('File uploaded successfully:', data);
-	    resolve(data);
-        })
-        .catch((error) => {
-            console.error('Error uploading file:', error);
-	    reject(error);
-        });
-    });
-},
-
-  win: function() {
-	// ohelpc('upload','Upload new file',`<file-upload></file-upload>`);
-	ohelpc('upload','Upload new file',`
-	<style>
-	    .filezone { border-radius: 8px; background-color: #f5f5f5; width: 448px; height: 160px; display: flex; align-items: center; justify-content: center; opacity: 0.8; }
-	    .fileactive { background-color: #f5fff5 !important; opacity: 1.0 !important; }
-    .textareaw {
-      align-self: stretch;
-      border-radius: 8px;
-      border: 1px solid #356bff;
-      display: flex;
-      flex-direction: row;
-      align-items: flex-start;
-      justify-content: flex-start;
-      max-width: 100%;
-      min-height: 40px; /* Минимальная высота */
-      overflow: hidden;  /* Скрываем скролл */
-    }
-
-    .fn {
-	margin-top:3px;
-	font-size: 12px;
-	display: flex;
-	align-items: center;
-	gap: 5px;
-    }
-
-    .fn_namea {
-	padding: 1px 10px 1px 10px;
-	border: 1px solid #ccc;
-	background-color: #eee;
-	border-radius: 15px;
-
-	display: flex;
-	align-items: center;
-	gap: 6px;
-
-	padding: 1px 10px 1px 10px;
-    }
-
-
-    .fn_name {
-	display: inline-block;
-	font-size: 12px;
-    }
-
-    .typeicon {
-	display: inline-block;
-	padding: -5px 10px -5px 5px;
-	font-size: 18px;
-	margin: -5px 0 -5px 0;
-    }
-
-    .delme {
-	display: inline-block;
-	font-size: 8px;
-    }
-
-	</style>
-
-	<div><textarea class='textareaw' placeholder='text message'></textarea></div>
-
-	<div class='filezone'>
-            <img class="mv" src="img/download_2.svg" />
-        </div>
-
-        <div><input name="zone" style='display:none' type="file" accept="*/*" multiple /></div>
-
-	<div class="fileplace"></div>
-
-        <p><div><input type='button' name="save" style='display:none' value="Save" /></div>
-	`);
-
-	const dropZone = dom('upload').querySelector(".filezone");
-	const inputZone = dom('upload').querySelector("input[name='zone']");
-	const inputSave = dom('upload').querySelector("input[name='save']");
-	const textArea = dom('upload').querySelector("textarea");
-	// const filePlace = dom('upload').querySelector(".fileplace");
-
-	textArea.addEventListener('input', (event) => {
-	    inputSave.style.display = (textArea.value == '' ? 'none' : 'block');
-	    // Сбрасываем высоту перед вычислением новой
-	    textArea.style.height = 'auto';
-	    // Устанавливаем высоту на основе прокручиваемой высоты
-    	    textArea.style.height = Math.min(textArea.scrollHeight, 300) + 'px';
-
-	    if(textArea.value) {
-		const file = new File([textArea.value], UPLOAD.textname, { type: "text/plain" });
-		UPLOAD.file_add([file]);
-	    } else UPLOAD.file_del(UPLOAD.textname);
-        });
-
-	// При выборе файлов через диалог
-        inputZone.addEventListener('change', (event) => {
-	    dropZone.classList.add('fileactive');
-	    UPLOAD.file_add( event.target.files );
-        });
-
-	// Событие dragover: предотвращаем стандартное поведение
-        dropZone.addEventListener('dragover', (event) => {
-	    event.preventDefault(); // Не даёт браузеру блокировать перетаскивание
-            dropZone.classList.add('fileactive');
-        });
-
-	// Событие dragleave: возвращаем исходный стиль
-        dropZone.addEventListener('dragleave', () => {
-	    event.preventDefault();
-	    dropZone.classList.remove('fileactive');
-	});
-
-	// Событие drop: получаем файлы
-        dropZone.addEventListener('drop', (event) => {
-	    event.preventDefault(); // Предотвращаем стандартное поведение браузера
-	    dropZone.classList.add('fileactive');
-
-	    const files = event.dataTransfer.files;
-	    if(files.length > 0) {
-    		console.log('Dropped files:', files);
-		UPLOAD.file_add(files);
-	    } else {
-    		console.warn('No files were dropped!');
-	    }
-	});
-
-        dropZone.addEventListener('click', (event) => {
-	    inputZone.click();
-	});
-
-	inputSave.addEventListener('click', (event) => {
-	    UPLOAD.file_ready();
-	});
-
-  },
-
-
-  file_add: function(files) {
-
-	    if(files) Array.from(files).forEach(file => {
-	        const i = UPLOAD.upfiles.findIndex(f => f.name === file.name);
-	        if(i < 0) UPLOAD.upfiles.push(file); else UPLOAD.upfiles[i] = file;
-    	    });
-
-	    dom('upload').querySelector(".fileplace").innerHTML = UPLOAD.upfiles.map(x => `<div class='fn'>
-<div class='delme mv0' onclick="UPLOAD.file_del('${x.name}')">&#10060;</div>
-<div class='fn_namea'>
-    <div alt='${h(x.type)}' class='typeicon'>${IPFS.typece(x.type)}</div>
-    <div class='fn_name'>${x.name}</div>
+<div style="display:flex; align-items:center; gap:20px;">
+	    <div id='my_current_account'></div>
+	    <input type='button' value='Change' onclick='G6.www_changeAcc()'>
+	    <input type='button' value='Edit' onclick="G6.www_identity()">
 </div>
-${x.size}
-</div>`).join('');
 
-	    dom('upload').querySelector("input[name='save']").style.display = (UPLOAD.upfiles.length ? 'block' : 'none');
-  },
+	    <div class='log_console'></div>
 
-  file_del: function(name) {
-	if(name === UPLOAD.textname) dom('upload').querySelector("textarea").value=''; // ибо нехуй! и понимания сути для.
-	UPLOAD.upfiles = UPLOAD.upfiles.filter(f => f.name !== name);
-	UPLOAD.file_add(false);
-  },
+<div id='mail_work' style='font-size:12px;'></div>
+<div style="display:flex; align-items:center; gap:20px;">
+	    <input type='button' value='Show all' class='mv0' onclick="dom('mail_work',PINGER.list_all_mail())">
+	    <input type='button' style='padding:10px' value='NEW MAIL' onclick="UPLOAD.win()">
+	    <input type='button' value='Check Mail' onclick="PINGER.www_check()">
+</div>
 
-  upfiles: [], // здесь будут файлы
-  textname: "message.txt", // так будет назван файл текста из формочки
+	    <p><div id='ipfs-my-list'></div>
+	    <p><div id='ipfs-list'><div class='ll' onclick='UPLOAD.relist()'>View all</div></div>
+	    <p><div id='polkadot_work' style='font-size:12px;'></div>
+    `);
+
+    log.set('Start');
+
+    log('Load IPFS-files');
+    await IPFS_need();
+    IPFS.init_cache();
+    await UPLOAD.relist();
+    await UPLOAD.relist_my();
+
+    log('Load JS-librares');
+    const N = await G6.load_js();
+
+    // И первым делом connect, потому что иначе нихуя ss58 не прочтется
+    log(`So, connected to CHAIN`,'magenta');
+    while(! await G6.connect() ) { await G6.sleep(3000); }
+
+    console.log('ss58', DOT.nodes.G6.ss58);
+
+    DOT.accs=[];
+
+    // Ищем кошельки в Wallets
+    log('Looking for Wallets');
+    if(await DOT.init_wallets() && DOT.accs.length) log(`Wallets found: ${DOT.accs.length}`);
+    else log('Wallets not found');
+
+    // Ищем кошельки на борту
+    log('Looking for localStore');
+    DOT.seeds = [];
+    try {
+	DOT.seeds = f5_read('G6.seed','');
+	DOT.seeds = JSON.parse(DOT.seeds);
+    } catch(er) {
+	DOT.seeds = typeof(DOT.seeds)=="string"? [DOT.seeds] : [];
+    }
+    for(const seed of DOT.seeds) {
+        log(`Restore from seed: ${seed}`);
+        var acc = await G6.restoreAcc(seed);
+        if(acc) DOT.accs.push(acc);
+    }
+
+    // Если никаких кошельков не нашли, создать аккаунт
+    if(! DOT.accs.length) {
+	log(`Create new seed`,'magenta');
+        if(! await G6.newAcc() || ! DOT.accs.length) return log.err(`Can't create new account`);
+    }
+
+    log(`So, you have ${DOT.accs.length} accounts`,'magenta');
+
+    for(var x of DOT.accs) x.acc=DOT.west(x.acc); // Пересчитать под другой ss58
+
+    // Если не выбрано аккаунта
+    if(!DOT.current_acc) {
+	const current_acc_id = f5_read('current_acc','');
+	if(current_acc_id) await G6.selectAcc(current_acc_id);
+	else await G6.selectAcc(DOT.accs[0].acc);
+    }
+
+    log.set(`Selected account: ${DOT.current_acc.name} ${DOT.current_acc.acc}`,'magenta');
+
+    // Пришло время проверить нашу почту
+    log.set('Check mail'); PINGER.www_check();
+
+    log(`Done`,'magenta');
+
+    setInterval(function(){PINGER.www_check()},5000);
 
 }
