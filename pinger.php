@@ -8,8 +8,20 @@ header('Content-Type: application/json'); // Установить тип сод�
 $baseDir = __DIR__ . '/pingdata';
 
 $action = $_GET['action'] ?? null;
-
 $account = $_GET['account'] ?? null;
+
+if($action === 'sysinfo') {
+    // Получение информации о загрузке CPU
+    $cpuLoad = shell_exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'");
+    // Получение информации о памяти
+    $memoryInfo = shell_exec("free -m | grep 'Mem:'");
+    $m = preg_split('/\s+/', trim($memoryInfo));
+    $total = $m[1];
+    $used = $m[2];
+    $free = $m[3];
+    die("CPU Load: ".trim($cpuLoad)."% Memory: $used / $total MB Free: $free MB\n");
+}
+
 
 if(!$account || !preg_match('/^[1-9A-HJ-NP-Za-km-z]{47,55}$/', $account)) die('Error 404 account');
 

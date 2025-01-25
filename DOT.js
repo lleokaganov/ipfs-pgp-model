@@ -1763,7 +1763,7 @@ progress: {
 	return true;
     },
 
-    connect: async function(CUR) {
+    connect: async function(CUR, timeout) {
 	if(!CUR) CUR=DOT.CUR;
 
 	// console.log("DOT.connect("+CUR+")");
@@ -1790,7 +1790,7 @@ progress: {
         async function fun() {
 	    return await Promise.race([
     		polkadotApi.ApiPromise.create(a), // Your long-running process
-    		new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000)) // Timeout promise
+    		new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout || 2000)) // Timeout promise
 	    ]);
 	}
 

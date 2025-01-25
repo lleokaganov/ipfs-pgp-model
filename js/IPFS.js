@@ -99,7 +99,7 @@ find_hash: function(hash) {
 },
 
 // Удаление с Веба
-Del: function(hash) {
+Del: function(hash,opt) {
     if(!confirm('Delete?')) return;
     hash=IPFS.find_hash(hash);
     AJAX(IPFS.endpointRm,{
@@ -116,7 +116,7 @@ Del: function(hash) {
 
 	try { UPLOAD.DelMy(hash) } catch(er){}
     },
-    onerror:function(o,u,s){
+    onerror: opt?.onerror? opt?.onerror : function(o,u,s){
 	console.log('Error onerror');
 	try { o=print_r(JSON.parse(o));	} catch(er){ o=h(o); }
 	ohelpc('idie2',
@@ -133,6 +133,8 @@ init_cache: function() {
 },
 
 // Методом HEAD получить content-type и 'content-length' и выполнить с ними заданную fn()
+
+//	        IPFS.Type(hash,function(hash,type,leng,name){
 Type: async function(hash,fn) {
     hash=IPFS.find_hash(hash);
 
@@ -151,7 +153,7 @@ Type: async function(hash,fn) {
 	var type=response.headers.get('content-type').replace(/;.+/g,'');
 	var leng=response.headers.get('content-length');
 	var name=false;
-	if(leng===null) leng='';
+	if(!leng) leng='';
         // if(hash=='bafyb4iame7mlfhwxyd5vstfclifrnhzuzv22xkrysoghwg57yn3xe7u4sm') console.log(hash,type,leng);
 
 	if(type=='text/plain'||type=='application/pgp-encrypted') {
@@ -160,7 +162,9 @@ Type: async function(hash,fn) {
             if(!textResponse.ok && textResponse.status !== 206) throw new Error(`Failed to fetch range: ${textResponse.status}`);
     	    const txt = await textResponse.text(); // Преобразуем ответ в текст
 	    if(txt.indexOf('--BEGIN PGP MESSAGE--')>=0) type='application/pgp-encrypted';
-	    name = ((txt.match(/\# PGP name\:\s*(.+)/) || [])[1]?.trim()) || null;
+	    name = ((txt.match(/\# FILE\:\s*(.+)/) || [])[1]?.trim())
+	    || ((txt.match(/\# PGP name\:\s*(.+)/) || [])[1]?.trim())
+	    || null;
 
 /*
 # PGP name: 20241228-040144-599185061.png

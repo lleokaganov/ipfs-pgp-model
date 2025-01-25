@@ -1,6 +1,21 @@
 PINGER={
     mname: 'listMessage',
 
+    showIPFS: function(change) {
+	var show = f5_read('showlist','');
+	if(change=='change') {
+	    show = show=='YES' ? 'NO' : 'YES';
+	    f5_save('showlist',show);
+	}
+	if(show=="YES") {
+	    dom('ipfs_pole').style.display='block';
+    	    UPLOAD.relist();
+	    UPLOAD.relist_my();
+	} else {
+	    dom('ipfs_pole').style.display='none';
+	}
+    },
+
     www_animate: function(id) {
 	const div = document.querySelector(`.mymail[pid='${id}']`);
         if(!div) return;
@@ -14,7 +29,8 @@ PINGER={
 	var R = await PINGER.read(DOT.current_acc.acc);
 	Object.entries(R).forEach(([id, time]) => { PINGER.add_mail(id,time); });
 	if(Object.entries(R).length) plays('img/bbm_tone.mp3',2);
-	dom('mail_work',PINGER.list_new_mail() );
+	dom('mail_work',
+	    PINGER.allMail_flag ? PINGER.list_all_mail() : PINGER.list_new_mail() );
 	ajaxoff();
     },
 
@@ -69,10 +85,15 @@ PINGER={
 
     del_mail: async function(x) {
 	// Удалить с IPFS
-	try { IPFS.Del(IPFS.hex2cid(x)); } catch(er){}
+	try { IPFS.Del(IPFS.hex2cid(x),{onerror:function(){}}); } catch(er){}
 	// Удалить из массива почты
 	var r = PINGER.readList();
 	r = r.filter(p => p[0] != x);
+
+	    const pid = IPFS.hex2cid(x);
+	    delete G6.MES[pid];
+	    f5_save('G6.MES',JSON.stringify(G6.MES));
+
 	PINGER.saveList(r);
     },
 
@@ -85,10 +106,15 @@ PINGER={
     list_all_mail: function(r) {
 	if(!r) r = PINGER.readList();
         return r.map(x => {
+	    const pid = IPFS.hex2cid(x[0]);
+	    const p=G6.MES[pid];
+	    console.log('pid '+pid,p);
+	    const add = !p ? '' : ` <b>${h(p.FROM)}</b><div class='br'>${h(p.TEXT.substring(0,50))}...</div>`;
 	    return `<div class='mymail' pid='${x[0]}'>
 <span class="mv" onclick="PINGER.del_mail('${x[0]}');clean(this.parentNode);">❌</span>
 <span style='font-size:22px;' class='mv0'>${x[2]?'✉':'📧'}</span>
-<a href='${IPFS.hex2url(x[0])}' target='_blank' onclick="PINGER.old_mail('${x[0]}'); UPLOAD.View('${IPFS.hex2url(x[0])}'); return false;">${unixtime2str(x[1])}</a>
+<a href='${IPFS.hex2url(x[0])}' target='_blank' onclick="PINGER.old_mail('${x[0]}'); UPLOAD.View(this.href); return false;">${unixtime2str(x[1])}</a>
+${add}
 </div>`;
         }).join('\n');
     },
@@ -142,7 +168,7 @@ async function INIT() {
     border-radius: 8px;
     padding: 6px;
     background-color: #d8eaea;
-    max-width: 350px;
+    width: 350px;
     margin-bottom: 6px;
 }
 
@@ -179,13 +205,17 @@ async function INIT() {
 
 <div id='mail_work' style='font-size:12px;'></div>
 <div style="display:flex; align-items:center; gap:20px;">
-	    <input type='button' value='Show all' class='mv0' onclick="dom('mail_work',PINGER.list_all_mail())">
+	    <input type='button' value='Show all' class='mv0' onclick="PINGER.allMail_flag=1; dom('mail_work',PINGER.list_all_mail())">
 	    <input type='button' style='padding:10px' value='NEW MAIL' onclick="UPLOAD.win()">
 	    <input type='button' value='Check Mail' onclick="PINGER.www_check()">
 </div>
 
+<div class='ll br' onclick="PINGER.showIPFS('change')">show ipfs details</div>
+<div id='ipfs_pole' style='display:none'>
 	    <p><div id='ipfs-my-list'></div>
 	    <p><div id='ipfs-list'><div class='ll' onclick='UPLOAD.relist()'>View all</div></div>
+</div>
+
 	    <p><div id='polkadot_work' style='font-size:12px;'></div>
     `);
 
@@ -194,15 +224,25 @@ async function INIT() {
     log('Load IPFS-files');
     await IPFS_need();
     IPFS.init_cache();
-    await UPLOAD.relist();
-    await UPLOAD.relist_my();
+
+    PINGER.showIPFS();
+
+
 
     log('Load JS-librares');
     const N = await G6.load_js();
 
     // И первым делом connect, потому что иначе нихуя ss58 не прочтется
     log(`So, connected to CHAIN`,'magenta');
-    while(! await G6.connect() ) { await G6.sleep(3000); }
+    while(! await G6.connect() ) {
+	    var sysinfo = await fetch("https://site.lleo.me/messager/pinger.php?action=sysinfo");
+	    if(!sysinfo.ok) log.err("[!] SERVER DOWN");
+	    else {
+		var sysinfo_text = await sysinfo.text(); // Читаем содержимое как текст
+		log.err(`[!] SERVER INFO: ` + sysinfo_text.replace("/\n/g"," "));
+	    }
+	    await G6.sleep(3000);
+    }
 
     console.log('ss58', DOT.nodes.G6.ss58);
 
@@ -252,6 +292,8 @@ async function INIT() {
 
     log(`Done`,'magenta');
 
-    setInterval(function(){PINGER.www_check()},5000);
+    try { G6.MES = JSON.parse(f5_read('G6.MES','')); } catch(er) { G6.MES={}; }
+
+    setInterval(function(){PINGER.www_check()},10000);
 
 }
